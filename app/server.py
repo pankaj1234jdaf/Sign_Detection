@@ -18,17 +18,20 @@ try:
     # Suppress TensorFlow warnings
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
     os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'false'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU only
     warnings.filterwarnings('ignore', category=UserWarning)
     import tensorflow as tf
     # Configure TensorFlow for memory efficiency
     try:
+        # Force CPU only for memory efficiency
+        tf.config.set_visible_devices([], 'GPU')
         tf.config.threading.set_inter_op_parallelism_threads(1)
         tf.config.threading.set_intra_op_parallelism_threads(1)
-        # Disable GPU if available to save memory
-        tf.config.set_visible_devices([], 'GPU')
+        # Limit memory usage
+        tf.config.experimental.enable_memory_growth = True
     except Exception as e:
-        logger.warning(f"TensorFlow configuration warning: {e}")
+        print(f"TensorFlow configuration warning: {e}")
     from tensorflow import keras
 except ImportError as e:
     print(f"TensorFlow import error: {e}")
@@ -96,6 +99,10 @@ def load_labels(path: str) -> List[str]:
 
 def load_model(model_path: str) -> keras.Model:
     """Load the trained model"""
+    if keras is None:
+        logger.warning("TensorFlow/Keras not available")
+        return None
+        
     path_to_use = model_path if os.path.exists(model_path) else H5_FALLBACK
     if not os.path.exists(path_to_use):
         logger.warning(f"Model file not found at {path_to_use}")
@@ -103,17 +110,21 @@ def load_model(model_path: str) -> keras.Model:
     
     try:
         # Load model with memory optimization
-        model = keras.models.load_model(path_to_use, compile=False)
+        with tf.device('/CPU:0'):  # Force CPU loading
+            model = keras.models.load_model(path_to_use, compile=False)
         # Recompile with memory-efficient settings
         model.compile(
             loss="sparse_categorical_crossentropy",
-            optimizer=keras.optimizers.Adam(learning_rate=0.001),
+            optimizer=keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0),
             metrics=["accuracy"],
         )
         # Force garbage collection after loading
         gc.collect()
+        logger.info(f"Model loaded successfully from {path_to_use}")
         return model
     except Exception as e:
+        logger.error(f"Error loading model from {path_to_use}: {e}")
+        return None
 
 
 # Initialize global variables
@@ -143,15 +154,18 @@ async def startup_event():
 
 def create_dummy_model(num_classes: int) -> keras.Model:
     """Create a dummy model for demo purposes when real model is not available"""
+    if keras is None:
+        return None
+        
     model = keras.Sequential([
         keras.layers.Input(shape=(42,)),
-        keras.layers.Dense(64, activation="relu"),
         keras.layers.Dense(32, activation="relu"),
+        keras.layers.Dense(16, activation="relu"),
         keras.layers.Dense(num_classes, activation="softmax"),
     ])
     model.compile(
         loss="sparse_categorical_crossentropy",
-        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        optimizer=keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0),
         metrics=["accuracy"],
     )
     logger.info("Created dummy model for demo purposes")
@@ -255,32 +269,23 @@ async def predict(image: UploadFile = File(...)):
     if MODEL is None:
         logger.error("Model not available for prediction")
         # Return a demo response when model is not available
-        demo_labels = ["A", "B", "C", "D", "E"]
-        demo_label = demo_labels[hash(str(content)) % len(demo_labels)]
+        import hashlib
+        demo_labels = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
+        hash_val = int(hashlib.md5(content[:100]).hexdigest(), 16)
+        demo_label = demo_labels[hash_val % len(demo_labels)]
         return JSONResponse({
             "label": demo_label, 
-            "confidence": 0.85, 
+            "confidence": 0.75 + (hash_val % 20) / 100,  # Random confidence 0.75-0.94
             "message": "Demo mode - model not loaded"
         })
 
-    # Reduced test-time augmentation for memory efficiency
-    scales = [1.0]  # Single scale to save maximum memory
+    # Single scale for maximum memory efficiency
+    scales = [1.0]
     probs_accum = None
     valid = 0
 
     for s in scales:
-        if s == 1.0:
-            img_s = base_img
-        else:
-            w, h = base_img.size
-            nw, nh = int(w * s), int(h * s)
-            resized = base_img.resize((nw, nh))
-            # center-crop or pad to original size
-            canvas = Image.new("RGB", (w, h), (0, 0, 0))
-            left = max(0, (w - nw) // 2)
-            top = max(0, (h - nh) // 2)
-            canvas.paste(resized, (left, top))
-            img_s = canvas
+        img_s = base_img  # Only use original scale
         
         probs = predict_image(img_s)
         if probs is not None:
@@ -288,9 +293,6 @@ async def predict(image: UploadFile = File(...)):
             valid += 1
             logger.info(f"Valid prediction for scale {s}")
         
-        # Clean up intermediate images
-        if s != 1.0:
-            del img_s
         gc.collect()
 
     if not valid:
