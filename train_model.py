@@ -31,7 +31,13 @@ def set_global_seeds(seed: int) -> None:
 
 def configure_tensorflow():
     """Configure TensorFlow for memory efficiency"""
-    # Set memory growth for GPU if available
+    # Disable GPU to save memory on free tier
+    try:
+        tf.config.set_visible_devices([], 'GPU')
+    except Exception:
+        pass
+    
+    # Set memory growth for GPU if available (fallback)
     gpus = tf.config.experimental.list_physical_devices('GPU')
     if gpus:
         try:
@@ -44,16 +50,16 @@ def configure_tensorflow():
     tf.config.threading.set_inter_op_parallelism_threads(1)
     tf.config.threading.set_intra_op_parallelism_threads(1)
 def build_model(input_dim: int, num_classes: int) -> keras.Model:
-    # Smaller model for memory efficiency
+    # Very small model for free tier memory constraints
     model = keras.Sequential(
         [
             layers.Input(shape=(input_dim,)),
-            layers.Dense(512, activation="relu"),  # Reduced size
+            layers.Dense(128, activation="relu"),  # Much smaller
             layers.Dropout(0.5),
-            layers.Dense(256, activation="relu"),  # Reduced size
+            layers.Dense(64, activation="relu"),   # Much smaller
             layers.Dropout(0.5),
-            layers.Dense(128, activation="relu"),  # Reduced size
-            layers.Dropout(0.5),
+            layers.Dense(32, activation="relu"),   # Much smaller
+            layers.Dropout(0.3),
             layers.Dense(num_classes, activation="softmax"),
         ]
     )
