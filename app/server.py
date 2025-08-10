@@ -3,6 +3,7 @@ import json
 import os
 import logging
 import warnings
+import gc
 from typing import List
 
 import numpy as np
@@ -16,11 +17,18 @@ import mediapipe as mp
 try:
     # Suppress TensorFlow warnings
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+    os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
     warnings.filterwarnings('ignore', category=UserWarning)
+    import tensorflow as tf
+    # Configure TensorFlow for memory efficiency
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+    tf.config.threading.set_intra_op_parallelism_threads(1)
     from tensorflow import keras
 except ImportError as e:
     print(f"TensorFlow import error: {e}")
     keras = None
+    tf = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -88,7 +96,11 @@ def load_model(model_path: str) -> keras.Model:
         raise FileNotFoundError(f"Model file not found at {path_to_use}. Train the model first.")
     
     try:
-        return keras.models.load_model(path_to_use)
+        # Load model with memory optimization
+        model = keras.models.load_model(path_to_use)
+        # Force garbage collection after loading
+        gc.collect()
+        return model
     except Exception as e:
         print(f"Error loading model from {path_to_use}: {e}")
         raise
@@ -155,7 +167,7 @@ def predict_image(pil_img: Image.Image) -> np.ndarray:
         max_num_hands=1, 
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
-        model_complexity=0
+        model_complexity=0  # Use lightest model for memory efficiency
     ) as hands:
         results = hands.process(img_np)
         if not results.multi_hand_landmarks:
@@ -175,6 +187,8 @@ def predict_image(pil_img: Image.Image) -> np.ndarray:
         df = pd.DataFrame([features])
         try:
             probs = MODEL.predict(df, verbose=0)[0]
+            # Force garbage collection after prediction
+            gc.collect()
             logger.info(f"Prediction successful, max confidence: {np.max(probs):.3f}")
             return probs
         except Exception as e:
@@ -189,7 +203,17 @@ async def predict(image: UploadFile = File(...)):
     
     try:
         content = await image.read()
+        # Limit image size for memory efficiency
+        if len(content) > 5 * 1024 * 1024:  # 5MB limit
+            raise HTTPException(status_code=413, detail="Image too large. Please use images smaller than 5MB.")
+            
         base_img = Image.open(io.BytesIO(content)).convert("RGB")
+        
+        # Resize large images to save memory
+        max_size = 800
+        if max(base_img.size) > max_size:
+            base_img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            
         logger.info(f"Image loaded successfully, size: {base_img.size}")
     except Exception as e:
         logger.error(f"Error loading image: {e}")
@@ -199,8 +223,8 @@ async def predict(image: UploadFile = File(...)):
         logger.error("Model not available for prediction")
         return JSONResponse({"label": None, "confidence": 0.0, "message": "Model not loaded"})
 
-    # Test-time augmentation: slight resizes around the base image
-    scales = [1.0, 0.9, 1.1]
+    # Reduced test-time augmentation for memory efficiency
+    scales = [1.0, 0.95]  # Fewer scales to save memory
     probs_accum = None
     valid = 0
 
@@ -223,6 +247,11 @@ async def predict(image: UploadFile = File(...)):
             probs_accum = probs if probs_accum is None else (probs_accum + probs)
             valid += 1
             logger.info(f"Valid prediction for scale {s}")
+        
+        # Clean up intermediate images
+        if s != 1.0:
+            del img_s
+        gc.collect()
 
     if not valid:
         logger.warning("No valid predictions from any scale")

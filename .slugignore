@@ -1,0 +1,12 @@
+# Ignore unnecessary files to reduce slug size
+*.pyc
+__pycache__/
+.git/
+.gitignore
+*.md
+tests/
+docs/
+examples/
+*.log
+.DS_Store
+Thumbs.db

@@ -57,8 +57,8 @@ A real-time Indian Sign Language detection system using deep learning, with a mo
 3. **Create New Web Service**:
    - Connect your GitHub repository
    - Choose **Python** environment
-   - Set **Build Command**: `pip install -r requirements.txt`
-   - Set **Start Command**: `uvicorn app.server:app --host 0.0.0.0 --port $PORT`
+   - Set **Build Command**: `pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt`
+   - Set **Start Command**: `uvicorn app.server:app --host 0.0.0.0 --port $PORT --workers 1`
    - Choose **Free** plan
 4. **Deploy** and wait for build to complete
 5. **Access** your app at the provided URL
@@ -69,6 +69,16 @@ A real-time Indian Sign Language detection system using deep learning, with a mo
 2. **Connect** repository to Render
 3. **Render will automatically** detect the `render.yaml` file
 4. **Deploy** with one click
+
+### Memory Optimization for Free Tier
+
+The project has been optimized for Render's free tier (512MB RAM):
+- Reduced TensorFlow model size
+- Memory-efficient image processing
+- Garbage collection after predictions
+- Limited test-time augmentation
+- Single worker process
+- Image size limits (5MB max, auto-resize to 800px)
 
 ## 📁 Project Structure
 
@@ -96,6 +106,8 @@ A real-time Indian Sign Language detection system using deep learning, with a mo
 
 - `PORT`: Server port (default: 8000)
 - `PYTHON_VERSION`: Python version (default: 3.11.0)
+- `TF_CPP_MIN_LOG_LEVEL`: TensorFlow logging level (default: 2)
+- `PYTHONUNBUFFERED`: Python output buffering (default: 1)
 
 ### Model Files
 
@@ -147,6 +159,8 @@ python detect.py --model model.keras --labels labels.json
 1. **Build fails**: Check `requirements.txt` for compatibility
 2. **App not starting**: Verify `Procfile` and start command
 3. **Model loading**: Ensure model files are in repository
+4. **Memory issues**: The app is optimized for 512MB RAM limit
+5. **Python version**: Uses Python 3.11.9 for TensorFlow compatibility
 
 ## 📄 License
 

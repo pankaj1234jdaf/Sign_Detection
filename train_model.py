@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import random
+import gc
 from typing import List
 
 import numpy as np
@@ -28,24 +29,37 @@ def set_global_seeds(seed: int) -> None:
     tf.random.set_seed(seed)
 
 
+def configure_tensorflow():
+    """Configure TensorFlow for memory efficiency"""
+    # Set memory growth for GPU if available
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as e:
+            print(f"GPU configuration error: {e}")
+    
+    # Configure for CPU efficiency
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+    tf.config.threading.set_intra_op_parallelism_threads(1)
 def build_model(input_dim: int, num_classes: int) -> keras.Model:
+    # Smaller model for memory efficiency
     model = keras.Sequential(
         [
             layers.Input(shape=(input_dim,)),
-            layers.Dense(1470, activation="relu"),
+            layers.Dense(512, activation="relu"),  # Reduced size
             layers.Dropout(0.5),
-            layers.Dense(832, activation="relu"),
+            layers.Dense(256, activation="relu"),  # Reduced size
             layers.Dropout(0.5),
-            layers.Dense(428, activation="relu"),
-            layers.Dropout(0.5),
-            layers.Dense(264, activation="relu"),
+            layers.Dense(128, activation="relu"),  # Reduced size
             layers.Dropout(0.5),
             layers.Dense(num_classes, activation="softmax"),
         ]
     )
     model.compile(
         loss="sparse_categorical_crossentropy",
-        optimizer="adam",
+        optimizer=keras.optimizers.Adam(learning_rate=0.001),
         metrics=["accuracy"],
     )
     return model
@@ -78,6 +92,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     configure_logging(args.verbose)
+    configure_tensorflow()
     set_global_seeds(args.seed)
 
     if not os.path.exists(args.csv):
@@ -118,11 +133,14 @@ def main() -> None:
         X_train,
         y_train,
         epochs=args.epochs,
-        batch_size=args.batch_size,
+        batch_size=min(args.batch_size, 64),  # Limit batch size for memory
         validation_data=(X_val, y_val),
         callbacks=callbacks,
         verbose=1,
     )
+
+    # Force garbage collection
+    gc.collect()
 
     # Evaluate
     val_probs = model.predict(X_val, verbose=0)
