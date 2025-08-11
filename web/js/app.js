@@ -1,316 +1,154 @@
-const $ = (sel) => document.querySelector(sel);
+// Simple ISL detector with speech
+let video, stream, detectionInterval;
+let lastSpoken = '';
 
-// Tabs
-const tabs = [
-  { btn: '#tab-webcam', panel: '#panel-webcam' },
-  { btn: '#tab-upload', panel: '#panel-upload' },
-  { btn: '#tab-about', panel: '#panel-about' },
-];
+// DOM elements
+const btnStart = document.getElementById('btn-start');
+const btnDetect = document.getElementById('btn-detect');
+const btnStop = document.getElementById('btn-stop');
+const predictionEl = document.getElementById('prediction');
+const confidenceEl = document.getElementById('confidence');
+const messageEl = document.getElementById('message');
+const autoSpeakEl = document.getElementById('auto-speak');
+const thresholdEl = document.getElementById('threshold');
+const thresholdValueEl = document.getElementById('threshold-value');
 
-function switchTab(activeBtnId) {
-  tabs.forEach(({ btn, panel }) => {
-    const btnEl = $(btn);
-    const panelEl = $(panel);
-    const isActive = btn === activeBtnId;
-    btnEl.classList.toggle('tab-active', isActive);
-    panelEl.classList.toggle('hidden', !isActive);
-  });
-}
+// Initialize
+video = document.getElementById('video');
 
-$('#tab-webcam').addEventListener('click', () => switchTab('#tab-webcam'));
-$('#tab-upload').addEventListener('click', () => switchTab('#tab-upload'));
-$('#tab-about').addEventListener('click', () => switchTab('#tab-about'));
+// Update threshold display
+thresholdEl.addEventListener('input', () => {
+  thresholdValueEl.textContent = thresholdEl.value;
+});
 
-// Speech helpers
-function speakText(text) {
-  if (!window.speechSynthesis) return;
+// Speech function
+function speak(text) {
+  if (!window.speechSynthesis || !text) return;
   
   // Cancel any ongoing speech
   window.speechSynthesis.cancel();
   
-  // Small delay to ensure cancellation is processed
   setTimeout(() => {
-    const uttr = new SpeechSynthesisUtterance(text);
-    uttr.rate = 0.9;
-    uttr.pitch = 1.0;
-    uttr.volume = 1.0;
-    uttr.lang = 'en-US';
-    
-    // Add error handling
-    uttr.onerror = (event) => {
-      console.error('Speech synthesis error:', event.error);
-    };
-    
-    uttr.onend = () => {
-      console.log('Speech synthesis completed for:', text);
-    };
-    
-    uttr.onstart = () => {
-      console.log('Speech synthesis started for:', text);
-    };
-    
-    window.speechSynthesis.speak(uttr);
-  }, 150);
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.8;
+    utterance.volume = 1.0;
+    utterance.lang = 'en-US';
+    window.speechSynthesis.speak(utterance);
+  }, 100);
 }
 
-// Webcam & detection (existing logic retained)
-const video = $('#video');
-const canvas = $('#canvas');
-const ctx = canvas.getContext('2d');
-const aiBadge = $('#ai-badge');
-const grid = $('#grid-overlay');
-let stream = null;
-let aiTimer = null;
-let lastSpoken = '';
-let lastLabel = '';
-let stableStart = 0;
-let lastActivityTs = Date.now();
-
-function fitCanvas() {
-  const rect = video.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height;
-}
-
-async function startWebcam() {
+// Start camera
+async function startCamera() {
   try {
-    console.log('Requesting webcam access...');
-    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { width: 640, height: 480 } 
+    });
     video.srcObject = stream;
-    video.onloadedmetadata = () => {
-      video.play();
-      fitCanvas();
-      console.log('Webcam started successfully');
-    };
-  } catch (e) {
-    console.error('Webcam access error:', e);
-    alert('Failed to access webcam: ' + e.message + '\n\nPlease ensure:\n1. Camera permissions are granted\n2. Camera is not being used by another application\n3. You are using HTTPS or localhost');
+    btnStart.disabled = true;
+    btnDetect.disabled = false;
+    messageEl.textContent = 'Camera started. Click "Start Detection" to begin.';
+  } catch (error) {
+    console.error('Camera error:', error);
+    messageEl.textContent = 'Failed to access camera. Please check permissions.';
   }
 }
 
-function stopWebcam() {
+// Stop camera
+function stopCamera() {
   if (stream) {
-    stream.getTracks().forEach((t) => t.stop());
+    stream.getTracks().forEach(track => track.stop());
     stream = null;
   }
+  if (detectionInterval) {
+    clearInterval(detectionInterval);
+    detectionInterval = null;
+  }
+  btnStart.disabled = false;
+  btnDetect.disabled = true;
+  btnDetect.textContent = 'Start Detection';
+  predictionEl.textContent = '–';
+  confidenceEl.textContent = 'Confidence: –';
+  messageEl.textContent = 'Camera stopped.';
 }
 
-function captureFrame() {
-  fitCanvas();
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
-  });
-}
-
-async function predictBlob(blob, updateTargets) {
-  const form = new FormData();
-  form.append('image', blob, 'frame.jpg');
+// Capture frame and predict
+async function captureAndPredict() {
+  if (!video.videoWidth || !video.videoHeight) return;
   
   try {
-    console.log('Sending prediction request...');
-    const res = await fetch('/predict', { method: 'POST', body: form });
-    if (!res.ok) {
-      throw new Error(`HTTP error! status: ${res.status}`);
+    // Create canvas to capture frame
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    
+    // Convert to blob
+    const blob = await new Promise(resolve => {
+      canvas.toBlob(resolve, 'image/jpeg', 0.8);
+    });
+    
+    // Send to server
+    const formData = new FormData();
+    formData.append('image', blob, 'frame.jpg');
+    
+    const response = await fetch('/predict', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    
+    // Update UI
+    if (result.label) {
+      predictionEl.textContent = result.label;
+      confidenceEl.textContent = `Confidence: ${result.confidence.toFixed(2)}`;
+      
+      // Auto-speak if enabled and confidence is high enough
+      const threshold = parseFloat(thresholdEl.value);
+      if (autoSpeakEl.checked && 
+          result.confidence >= threshold && 
+          result.label !== lastSpoken) {
+        speak(result.label);
+        lastSpoken = result.label;
+      }
+    } else {
+      predictionEl.textContent = '–';
+      confidenceEl.textContent = 'Confidence: –';
     }
-    const data = await res.json();
-    console.log('Prediction result:', data.label, 'confidence:', data.confidence);
-    updateTargets(data);
+    
+    messageEl.textContent = result.message || 'Detecting...';
+    
   } catch (error) {
     console.error('Prediction error:', error);
-    updateTargets({ 
-      label: null, 
-      confidence: 0, 
-      message: `Error: ${error.message}` 
-    });
+    messageEl.textContent = 'Detection error. Please try again.';
   }
 }
 
-function getConfThreshold() {
-  return parseFloat($('#conf-slider').value) || 0.8;
-}
-
-function updatePrediction({ label, confidence, message }) {
-  $('#prediction').textContent = label ?? '–';
-  $('#confidence').textContent = 'Confidence: ' + (confidence?.toFixed?.(3) ?? '–');
-  $('#message').textContent = message ?? '';
-
-  const confTh = getConfThreshold();
-  const now = Date.now();
-
-  if (label && confidence >= confTh) {
-    if (label !== lastLabel) {
-      lastLabel = label;
-      stableStart = now;
-      console.log('New stable label detected:', label);
-    }
+// Start/stop detection
+function toggleDetection() {
+  if (detectionInterval) {
+    // Stop detection
+    clearInterval(detectionInterval);
+    detectionInterval = null;
+    btnDetect.textContent = 'Start Detection';
+    messageEl.textContent = 'Detection stopped.';
   } else {
-    lastLabel = '';
-    stableStart = 0;
-  }
-
-  const speakOn = $('#speak-toggle').checked;
-  if (speakOn && label && confidence >= confTh && label !== lastSpoken) {
-    console.log('Speaking label:', label, 'confidence:', confidence);
-    lastSpoken = label;
-    speakText(label);
-  }
-
-  const autoAdd = $('#auto-add-toggle').checked;
-  if (autoAdd && lastLabel && stableStart && now - stableStart >= 800) {
-    addToSentence(lastLabel);
-    stableStart = 0;
-  }
-
-  lastActivityTs = now;
-}
-
-$('#conf-slider').addEventListener('input', () => {
-  $('#conf-value').textContent = parseFloat($('#conf-slider').value).toFixed(2);
-});
-
-$('#btn-start').addEventListener('click', startWebcam);
-$('#btn-stop').addEventListener('click', () => {
-  stopAI();
-  stopWebcam();
-});
-$('#btn-capture').addEventListener('click', async () => {
-  if (!stream) await startWebcam();
-  const blob = await captureFrame();
-  await predictBlob(blob, updatePrediction);
-});
-
-async function aiLoop() {
-  if (!stream) await startWebcam();
-  try {
-    const blob = await captureFrame();
-    if (!blob) {
-      console.error('Failed to capture frame');
-      return;
-    }
-    await predictBlob(blob, updatePrediction);
-  } catch (error) {
-    console.error('AI loop error:', error);
+    // Start detection
+    detectionInterval = setInterval(captureAndPredict, 1000); // Every 1 second
+    btnDetect.textContent = 'Stop Detection';
+    messageEl.textContent = 'Detecting signs...';
   }
 }
 
-function startAI() {
-  if (aiTimer) return;
-  console.log('Starting AI detection...');
-  aiBadge.classList.remove('hidden');
-  $('#btn-ai').textContent = 'Stop AI';
-  aiTimer = setInterval(async () => {
-    try {
-      await aiLoop();
-      maybeAutoSpeakSentence();
-    } catch (error) {
-      console.error('AI timer error:', error);
-    }
-  }, 500);
-}
+// Event listeners
+btnStart.addEventListener('click', startCamera);
+btnStop.addEventListener('click', stopCamera);
+btnDetect.addEventListener('click', toggleDetection);
 
-function stopAI() {
-  if (!aiTimer) return;
-  console.log('Stopping AI detection...');
-  clearInterval(aiTimer);
-  aiTimer = null;
-  aiBadge.classList.add('hidden');
-  $('#btn-ai').textContent = 'Start AI';
-}
-
-$('#btn-ai').addEventListener('click', () => {
-  if (aiTimer) stopAI(); else startAI();
+// Test speech on page load
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    speak('ISL detector ready');
+  }, 1000);
 });
-
-// Upload flow
-const fileInput = $('#file-input');
-const preview = $('#preview');
-
-fileInput.addEventListener('change', () => {
-  const file = fileInput.files?.[0];
-  if (!file) return;
-  preview.src = URL.createObjectURL(file);
-  preview.classList.remove('hidden');
-});
-
-$('#btn-upload-predict').addEventListener('click', async () => {
-  const file = fileInput.files?.[0];
-  if (!file) {
-    alert('Please choose an image first.');
-    return;
-  }
-  console.log('Predicting uploaded file:', file.name);
-  await predictBlob(file, ({ label, confidence, message }) => {
-    $('#prediction-upload').textContent = label ?? '–';
-    $('#confidence-upload').textContent = 'Confidence: ' + (confidence?.toFixed?.(3) ?? '–');
-    $('#message-upload').textContent = message ?? '';
-  });
-});
-
-// Sentence builder
-function currentSentence() { return $('#sentence').textContent || ''; }
-function setSentence(text) { $('#sentence').textContent = text; }
-function addToSentence(token) { setSentence((currentSentence() + (currentSentence().endsWith(' ') || currentSentence() === '' ? '' : ' ') + token).trimStart()); }
-
-$('#btn-add').addEventListener('click', () => {
-  const label = $('#prediction').textContent.trim();
-  if (label && label !== '–') addToSentence(label);
-});
-$('#btn-space').addEventListener('click', () => setSentence(currentSentence() + ' '));
-$('#btn-backspace').addEventListener('click', () => setSentence(currentSentence().slice(0, -1)));
-$('#btn-clear-sentence').addEventListener('click', () => setSentence(''));
-$('#btn-speak-sentence').addEventListener('click', () => speakText(currentSentence()));
-
-function maybeAutoSpeakSentence() {
-  const autoSpeakSentence = $('#auto-speak-sentence-toggle').checked;
-  if (!autoSpeakSentence) return;
-  const now = Date.now();
-  if (now - lastActivityTs >= 3000) {
-    const text = currentSentence().trim();
-    if (text) speakText(text);
-    lastActivityTs = now + 1e9;
-  }
-}
-
-// New utility buttons
-$('#btn-grid').addEventListener('click', () => grid.classList.toggle('hidden'));
-$('#btn-reset').addEventListener('click', () => {
-  stopAI();
-  stopWebcam();
-  setSentence('');
-  $('#prediction').textContent = '–';
-  $('#confidence').textContent = 'Confidence: –';
-  $('#message').textContent = '';
-});
-
-const helpModal = $('#help-modal');
-$('#btn-help').addEventListener('click', () => helpModal.classList.remove('hidden'));
-$('#help-close').addEventListener('click', () => helpModal.classList.add('hidden'));
-
-$('#btn-copy-sentence').addEventListener('click', async () => {
-  try {
-    await navigator.clipboard.writeText(currentSentence());
-    alert('Sentence copied to clipboard');
-  } catch { alert('Copy failed'); }
-});
-
-$('#btn-download-sentence').addEventListener('click', () => {
-  const blob = new Blob([currentSentence()], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'sentence.txt';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-});
-
-// Test speech functionality
-$('#btn-test-speech').addEventListener('click', () => {
-  console.log('Testing speech synthesis...');
-  speakText('Speech test successful');
-});
-
-// Default to webcam tab
-switchTab('#tab-webcam');
