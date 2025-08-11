@@ -1,1 +1,1 @@
-web: python --version && uvicorn app.server:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 30 --access-log
+web: uvicorn app.server:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 65 --keep-alive 5 --max-requests 100 --max-requests-jitter 10

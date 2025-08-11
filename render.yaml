@@ -7,21 +7,25 @@ services:
     buildCommand: |
       python --version &&
       pip install --upgrade pip &&
-      pip install --no-cache-dir -r requirements.txt
-    startCommand: uvicorn app.server:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 30
+      pip install --no-cache-dir --no-deps -r requirements.txt
+    startCommand: uvicorn app.server:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 65 --keep-alive 5 --max-requests 100 --max-requests-jitter 10
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: TF_CPP_MIN_LOG_LEVEL
-        value: "2"
+        value: "3"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: TF_ENABLE_ONEDNN_OPTS
         value: "0"
       - key: PIP_NO_CACHE_DIR
         value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: TF_NUM_INTEROP_THREADS
+        value: "1"
+      - key: TF_NUM_INTRAOP_THREADS
+        value: "1"
     healthCheckPath: /health
-    disk:
-      name: isl-data
-      mountPath: /opt/render/project/data
-      sizeGB: 1

@@ -10,3 +10,10 @@ examples/
 *.log
 .DS_Store
 Thumbs.db
+*.keras
+train_model.py
+detect.py
+hand_keypoints.csv
+*.txt
+!requirements.txt
+!runtime.txt
