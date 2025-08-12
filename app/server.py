@@ -13,8 +13,9 @@ from PIL import Image
 import mediapipe as mp
 
 # Minimal logging to reduce memory
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.CRITICAL)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,11 +42,28 @@ LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
 
 # Initialize MediaPipe once
 mp_hands = mp.solutions.hands
-hands_detector = mp_hands.Hands(
+hands_detector = None
+
+def get_hands_detector():
+    global hands_detector
+    if hands_detector is None:
+        hands_detector = mp_hands.Hands(
+            static_image_mode=True,
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            model_complexity=0
+        )
+    return hands_detector
+
+# Lazy initialization to save memory
+def init_detector():
+    return mp_hands.Hands(
     static_image_mode=True,
     max_num_hands=1,
-    min_detection_confidence=0.7,
-    model_complexity=0  # Fastest model
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5,
+    model_complexity=0
 )
 
 @app.get("/")
@@ -127,7 +145,8 @@ async def predict(image: UploadFile = File(...)):
         img_np = np.array(img, dtype=np.uint8)
         
         # Hand detection
-        results = hands_detector.process(img_np)
+        detector = get_hands_detector()
+        results = detector.process(img_np)
         
         if not results.multi_hand_landmarks:
             return {"label": None, "confidence": 0.0}
