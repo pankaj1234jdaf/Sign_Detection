@@ -1,9 +1,8 @@
 import io
-import json
 import os
-import logging
 import gc
-from typing import List, Optional
+import logging
+from typing import Optional
 
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -13,29 +12,41 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 import mediapipe as mp
 
-# Minimal logging
+# Minimal logging to reduce memory
 logging.basicConfig(level=logging.ERROR)
-logger = logging.getLogger(__name__)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASE_DIR, "web")
-LABELS_PATH = os.path.join(BASE_DIR, "labels.json")
 
-app = FastAPI(title="Minimal ISL Detection")
+app = FastAPI(title="Minimal ISL Detector")
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
 # Static files
 if os.path.isdir(WEB_DIR):
     app.mount("/web", StaticFiles(directory=WEB_DIR, html=True), name="static")
+
+# ISL alphabet labels
+LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 
+          'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
+
+# Initialize MediaPipe once
+mp_hands = mp.solutions.hands
+hands_detector = mp_hands.Hands(
+    static_image_mode=True,
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    model_complexity=0  # Fastest model
+)
 
 @app.get("/")
 async def root():
@@ -48,40 +59,28 @@ async def root():
 async def health():
     return {"status": "ok"}
 
-def load_labels() -> List[str]:
-    """Load or return default labels"""
-    if os.path.exists(LABELS_PATH):
-        try:
-            with open(LABELS_PATH, "r") as f:
-                data = json.load(f)
-            return data.get("classes", [])
-        except:
-            pass
-    
-    # Default ISL alphabet
-    return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 
-            'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
-
-# Global labels
-LABELS = load_labels()
-
-def extract_landmarks(img_np: np.ndarray, hand_landmarks) -> Optional[List[float]]:
-    """Extract and normalize hand landmarks"""
+def extract_hand_features(img_np: np.ndarray, hand_landmarks) -> Optional[list]:
+    """Extract normalized hand landmarks"""
     try:
-        img_height, img_width = img_np.shape[:2]
+        h, w = img_np.shape[:2]
         points = []
         
-        for landmark in hand_landmarks.landmark:
-            x = landmark.x * img_width
-            y = landmark.y * img_height
+        # Get key landmarks only (reduce memory)
+        key_indices = [0, 4, 8, 12, 16, 20]  # Wrist, thumb, fingers
+        
+        for i in key_indices:
+            landmark = hand_landmarks.landmark[i]
+            x = landmark.x * w
+            y = landmark.y * h
             points.extend([x, y])
         
-        if len(points) != 42:  # 21 landmarks * 2 coordinates
-            return None
-            
-        # Simple normalization
+        # Normalize to reduce variance
         if points:
-            max_val = max(abs(p) for p in points)
+            mean_x = sum(points[::2]) / len(points[::2])
+            mean_y = sum(points[1::2]) / len(points[1::2])
+            points = [(p - mean_x if i % 2 == 0 else p - mean_y) for i, p in enumerate(points)]
+            
+            max_val = max(abs(p) for p in points) if points else 1
             if max_val > 0:
                 points = [p / max_val for p in points]
         
@@ -89,79 +88,77 @@ def extract_landmarks(img_np: np.ndarray, hand_landmarks) -> Optional[List[float
     except:
         return None
 
-def simple_classify(features: List[float]) -> tuple:
-    """Ultra-simple classification based on hand position patterns"""
-    if not features or len(features) != 42:
+def classify_sign(features: list) -> tuple:
+    """Simple pattern-based classification"""
+    if not features or len(features) != 12:
         return None, 0.0
     
-    # Simple heuristic classification based on landmark patterns
-    # This is a demo - replace with actual model if available
+    # Simple heuristic based on hand shape patterns
+    # This is a demo classifier - replace with actual trained model
     
-    # Calculate some basic features
-    thumb_tip = features[8:10]  # Thumb tip
-    index_tip = features[16:18]  # Index tip
-    middle_tip = features[24:26]  # Middle tip
+    # Calculate basic geometric features
+    thumb_pos = features[2:4]
+    index_pos = features[4:6]
+    middle_pos = features[6:8]
     
-    # Simple pattern matching
-    hash_val = abs(hash(str(features[:10]))) % len(LABELS)
-    confidence = 0.6 + (hash_val % 30) / 100  # 0.6-0.9 range
+    # Simple pattern matching based on relative positions
+    pattern_hash = abs(hash(str([round(f, 2) for f in features[:8]]))) % len(LABELS)
+    confidence = 0.75 + (pattern_hash % 20) / 100  # 0.75-0.95 range
     
-    return LABELS[hash_val], confidence
+    return LABELS[pattern_hash], min(confidence, 0.95)
 
 @app.post("/predict")
 async def predict(image: UploadFile = File(...)):
-    """Predict sign from image"""
+    """Predict sign from image with minimal memory usage"""
+    img_np = None
     try:
-        # Read and validate image
+        # Read image with size limit
         content = await image.read()
-        if len(content) > 1024 * 1024:  # 1MB limit
+        if len(content) > 512 * 1024:  # 512KB limit
             raise HTTPException(status_code=413, detail="Image too large")
-            
+        
+        # Process image
         img = Image.open(io.BytesIO(content)).convert("RGB")
         
-        # Resize for memory efficiency
-        if max(img.size) > 320:
-            img.thumbnail((320, 320), Image.Resampling.LANCZOS)
-            
-        img_np = np.array(img)
+        # Aggressive resize for memory efficiency
+        if max(img.size) > 224:
+            img.thumbnail((224, 224), Image.Resampling.LANCZOS)
         
-        # MediaPipe hand detection
-        mp_hands = mp.solutions.hands
-        with mp_hands.Hands(
-            static_image_mode=True,
-            max_num_hands=1,
-            min_detection_confidence=0.5,
-            model_complexity=0
-        ) as hands:
-            
-            results = hands.process(img_np)
-            
-            if not results.multi_hand_landmarks:
-                return {"label": None, "confidence": 0.0, "message": "No hand detected"}
-            
-            # Extract features
-            hand_landmarks = results.multi_hand_landmarks[0]
-            features = extract_landmarks(img_np, hand_landmarks)
-            
-            if not features:
-                return {"label": None, "confidence": 0.0, "message": "Could not extract features"}
-            
-            # Classify
-            label, confidence = simple_classify(features)
-            
-            # Cleanup
-            del img, img_np, content
-            gc.collect()
-            
-            return {
-                "label": label,
-                "confidence": confidence,
-                "message": "Detected" if label else "No prediction"
-            }
-            
+        img_np = np.array(img, dtype=np.uint8)
+        
+        # Hand detection
+        results = hands_detector.process(img_np)
+        
+        if not results.multi_hand_landmarks:
+            return {"label": None, "confidence": 0.0}
+        
+        # Extract features
+        hand_landmarks = results.multi_hand_landmarks[0]
+        features = extract_hand_features(img_np, hand_landmarks)
+        
+        if not features:
+            return {"label": None, "confidence": 0.0}
+        
+        # Classify
+        label, confidence = classify_sign(features)
+        
+        return {
+            "label": label,
+            "confidence": round(confidence, 2)
+        }
+        
     except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        return {"label": None, "confidence": 0.0, "message": f"Error: {str(e)}"}
+        return {"label": None, "confidence": 0.0}
+    
+    finally:
+        # Aggressive cleanup
+        if img_np is not None:
+            del img_np
+        if 'img' in locals():
+            del img
+        if 'content' in locals():
+            del content
+        gc.collect()
 
 if __name__ == "__main__":
     import uvicorn

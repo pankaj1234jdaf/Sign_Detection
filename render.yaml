@@ -2,15 +2,17 @@ services:
   - type: web
     name: minimal-isl-detector
     env: python
-    runtime: python-3.9.16
+    runtime: python-3.11.9
     plan: free
     buildCommand: |
       pip install --upgrade pip &&
-      pip install -r requirements.txt
-    startCommand: uvicorn app.server:app --host 0.0.0.0 --port $PORT --workers 1
+      pip install --no-cache-dir -r requirements.txt
+    startCommand: uvicorn app.server:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 30
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: PYTHONDONTWRITEBYTECODE
         value: "1"
+      - key: TF_CPP_MIN_LOG_LEVEL
+        value: "3"
     healthCheckPath: /health
