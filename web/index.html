@@ -1,216 +1,420 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ISL Detector</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { 
-      font-family: system-ui, sans-serif; 
-      background: #111;
-      color: white;
-      padding: 20px;
-    }
-    .container { 
-      max-width: 800px; 
-      margin: 0 auto; 
-    }
-    .card { 
-      background: #222;
-      border: 1px solid #444; 
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    .btn { 
-      background: #333;
-      color: white; 
-      border: 1px solid #555;
-      padding: 12px 24px;
-      border-radius: 6px;
-      cursor: pointer;
-      margin: 5px;
-      font-size: 14px;
-    }
-    .btn:hover { background: #444; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    #video {
-      width: 100%;
-      max-width: 400px;
-      height: 300px;
-      background: #000;
-      border-radius: 6px;
-      object-fit: cover;
-    }
-    .result {
-      font-size: 3rem;
-      font-weight: bold;
-      color: #4ade80;
-      text-align: center;
-      margin: 20px 0;
-      min-height: 80px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .confidence {
-      text-align: center;
-      color: #888;
-      margin-bottom: 20px;
-    }
-    .controls {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-    h1 { text-align: center; margin-bottom: 30px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISL to Speech Converter</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .video-container {
+            position: relative;
+            margin-bottom: 30px;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        #video {
+            width: 100%;
+            max-width: 500px;
+            height: 375px;
+            background: #000;
+            object-fit: cover;
+            border-radius: 15px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+            min-width: 140px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn.stop {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.3);
+        }
+
+        .btn.stop:hover {
+            box-shadow: 0 8px 25px rgba(255, 107, 107, 0.4);
+        }
+
+        .result-section {
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .prediction {
+            font-size: 4rem;
+            font-weight: bold;
+            color: #4CAF50;
+            margin-bottom: 15px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .confidence {
+            font-size: 1.2rem;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .message {
+            font-size: 1rem;
+            color: #888;
+            font-style: italic;
+        }
+
+        .settings {
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .setting-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .setting-group label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        input[type="range"] {
+            width: 200px;
+            height: 6px;
+            border-radius: 3px;
+            background: #ddd;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            accent-color: #667eea;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .prediction {
+                font-size: 3rem;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1>ISL Sign Detector</h1>
-    
-    <div class="card">
-      <video id="video" autoplay muted playsinline></video>
-      <div class="controls">
-        <button id="startBtn" class="btn">Start Camera</button>
-        <button id="detectBtn" class="btn" disabled>Start Detection</button>
-        <button id="stopBtn" class="btn">Stop</button>
-      </div>
+    <div class="container">
+        <h1>🤟 ISL to Speech Converter</h1>
+        
+        <div class="video-container">
+            <video id="video" autoplay muted playsinline></video>
+        </div>
+
+        <div class="controls">
+            <button id="btn-start" class="btn">📹 Start Camera</button>
+            <button id="btn-detect" class="btn" disabled>🤖 Start AI</button>
+            <button id="btn-stop" class="btn stop">⏹️ Stop</button>
+        </div>
+
+        <div class="settings">
+            <div class="setting-group">
+                <label for="threshold">Confidence Threshold:</label>
+                <input type="range" id="threshold" min="0.5" max="0.95" step="0.05" value="0.75">
+                <span id="threshold-value">0.75</span>
+            </div>
+            <div class="setting-group">
+                <label for="auto-speak">
+                    <input type="checkbox" id="auto-speak" checked>
+                    Auto Speak
+                </label>
+            </div>
+        </div>
+
+        <div class="result-section">
+            <div id="prediction" class="prediction">–</div>
+            <div id="confidence" class="confidence">Confidence: –</div>
+            <div id="message" class="message">Ready to detect signs</div>
+        </div>
     </div>
 
-    <div class="card">
-      <div id="result" class="result">–</div>
-      <div id="confidence" class="confidence">Ready</div>
-    </div>
-  </div>
+    <script>
+        // Global variables
+        let video, stream, detectionInterval;
+        let lastSpoken = '';
+        let isDetecting = false;
 
-  <script>
-    let video, stream, detecting = false, lastSpoken = '';
-    
-    const startBtn = document.getElementById('startBtn');
-    const detectBtn = document.getElementById('detectBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const result = document.getElementById('result');
-    const confidence = document.getElementById('confidence');
-    
-    video = document.getElementById('video');
+        // DOM elements
+        const btnStart = document.getElementById('btn-start');
+        const btnDetect = document.getElementById('btn-detect');
+        const btnStop = document.getElementById('btn-stop');
+        const predictionEl = document.getElementById('prediction');
+        const confidenceEl = document.getElementById('confidence');
+        const messageEl = document.getElementById('message');
+        const autoSpeakEl = document.getElementById('auto-speak');
+        const thresholdEl = document.getElementById('threshold');
+        const thresholdValueEl = document.getElementById('threshold-value');
 
-    // Speech synthesis
-    function speak(text) {
-      if (!text || text === lastSpoken) return;
-      lastSpoken = text;
-      
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-        setTimeout(() => {
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.rate = 0.9;
-          utterance.volume = 1.0;
-          window.speechSynthesis.speak(utterance);
-        }, 100);
-      }
-    }
+        // Initialize
+        video = document.getElementById('video');
 
-    // Start camera
-    async function startCamera() {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 320, height: 240 } // Small resolution
+        // Update threshold display
+        thresholdEl.addEventListener('input', () => {
+            thresholdValueEl.textContent = thresholdEl.value;
         });
-        video.srcObject = stream;
-        startBtn.disabled = true;
-        detectBtn.disabled = false;
-        confidence.textContent = 'Camera ready';
-      } catch (error) {
-        confidence.textContent = 'Camera access denied';
-      }
-    }
 
-    // Stop everything
-    function stopAll() {
-      detecting = false;
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        stream = null;
-      }
-      startBtn.disabled = false;
-      detectBtn.disabled = true;
-      detectBtn.textContent = 'Start Detection';
-      result.textContent = '–';
-      confidence.textContent = 'Stopped';
-      lastSpoken = '';
-    }
-
-    // Capture and predict
-    async function captureFrame() {
-      if (!detecting || !video.videoWidth) return;
-      
-      try {
-        // Create small canvas
-        const canvas = document.createElement('canvas');
-        canvas.width = 224;
-        canvas.height = 224;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, 224, 224);
-        
-        // Convert to blob
-        const blob = await new Promise(resolve => {
-          canvas.toBlob(resolve, 'image/jpeg', 0.7);
-        });
-        
-        // Send to server
-        const formData = new FormData();
-        formData.append('image', blob);
-        
-        const response = await fetch('/predict', {
-          method: 'POST',
-          body: formData
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          
-          if (data.label && data.confidence > 0.8) {
-            result.textContent = data.label;
-            confidence.textContent = `${Math.round(data.confidence * 100)}%`;
-            speak(data.label);
-          } else {
-            result.textContent = '–';
-            confidence.textContent = 'Detecting...';
-          }
+        // Speech synthesis function
+        function speak(text) {
+            if (!window.speechSynthesis || !text || text === lastSpoken) return;
+            
+            // Cancel any ongoing speech
+            window.speechSynthesis.cancel();
+            
+            setTimeout(() => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                utterance.volume = 1.0;
+                utterance.lang = 'en-US';
+                utterance.pitch = 1.0;
+                
+                window.speechSynthesis.speak(utterance);
+                lastSpoken = text;
+            }, 100);
         }
-        
-      } catch (error) {
-        confidence.textContent = 'Detection error';
-      }
-      
-      // Continue detection
-      if (detecting) {
-        setTimeout(captureFrame, 1500); // Every 1.5 seconds
-      }
-    }
 
-    // Toggle detection
-    function toggleDetection() {
-      if (detecting) {
-        detecting = false;
-        detectBtn.textContent = 'Start Detection';
-        confidence.textContent = 'Detection stopped';
-      } else {
-        detecting = true;
-        detectBtn.textContent = 'Stop Detection';
-        confidence.textContent = 'Detecting...';
-        captureFrame();
-      }
-    }
+        // Start camera
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    } 
+                });
+                video.srcObject = stream;
+                btnStart.disabled = true;
+                btnDetect.disabled = false;
+                messageEl.textContent = 'Camera started. Click "Start AI" to begin detection.';
+            } catch (error) {
+                console.error('Camera error:', error);
+                messageEl.textContent = 'Failed to access camera. Please check permissions.';
+            }
+        }
 
-    // Event listeners
-    startBtn.addEventListener('click', startCamera);
-    detectBtn.addEventListener('click', toggleDetection);
-    stopBtn.addEventListener('click', stopAll);
-  </script>
+        // Stop everything
+        function stopAll() {
+            isDetecting = false;
+            
+            if (detectionInterval) {
+                clearInterval(detectionInterval);
+                detectionInterval = null;
+            }
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            btnStart.disabled = false;
+            btnDetect.disabled = true;
+            btnDetect.textContent = '🤖 Start AI';
+            predictionEl.textContent = '–';
+            confidenceEl.textContent = 'Confidence: –';
+            messageEl.textContent = 'Stopped.';
+            lastSpoken = '';
+        }
+
+        // Capture frame and predict
+        async function captureAndPredict() {
+            if (!isDetecting || !video.videoWidth || !video.videoHeight) return;
+            
+            try {
+                // Create canvas to capture frame
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0);
+                
+                // Convert to blob with good quality
+                const blob = await new Promise(resolve => {
+                    canvas.toBlob(resolve, 'image/jpeg', 0.85);
+                });
+                
+                // Send to server
+                const formData = new FormData();
+                formData.append('image', blob, 'frame.jpg');
+                
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                // Update UI
+                if (result.label) {
+                    predictionEl.textContent = result.label;
+                    confidenceEl.textContent = `Confidence: ${(result.confidence * 100).toFixed(0)}%`;
+                    
+                    // Auto-speak if enabled and confidence is high enough
+                    const threshold = parseFloat(thresholdEl.value);
+                    if (autoSpeakEl.checked && result.confidence >= threshold) {
+                        speak(result.label);
+                    }
+                } else {
+                    predictionEl.textContent = '–';
+                    confidenceEl.textContent = 'Confidence: –';
+                }
+                
+                messageEl.textContent = result.message || 'Detecting...';
+                
+            } catch (error) {
+                console.error('Prediction error:', error);
+                messageEl.textContent = 'Detection error. Please try again.';
+            }
+        }
+
+        // Toggle detection
+        function toggleDetection() {
+            if (isDetecting) {
+                // Stop detection
+                isDetecting = false;
+                if (detectionInterval) {
+                    clearInterval(detectionInterval);
+                    detectionInterval = null;
+                }
+                btnDetect.textContent = '🤖 Start AI';
+                messageEl.textContent = 'Detection stopped.';
+            } else {
+                // Start detection
+                isDetecting = true;
+                detectionInterval = setInterval(captureAndPredict, 1000); // Every 1 second
+                btnDetect.textContent = '⏸️ Stop AI';
+                messageEl.textContent = 'Detecting signs...';
+                captureAndPredict(); // Start immediately
+            }
+        }
+
+        // Event listeners
+        btnStart.addEventListener('click', startCamera);
+        btnStop.addEventListener('click', stopAll);
+        btnDetect.addEventListener('click', toggleDetection);
+
+        // Initialize speech on page load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                speak('ISL detector ready');
+            }, 1000);
+        });
+    </script>
 </body>
 </html>
